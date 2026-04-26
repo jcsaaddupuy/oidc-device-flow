@@ -40,6 +40,7 @@ async fn main() {
         cli::Command::Remove(cmd) => cmd_remove(json, cmd).await,
         cli::Command::ConfigExport(cmd) => cmd_config_export(cmd).await,
         cli::Command::Config(_) => cmd_config(json).await,
+        cli::Command::Encryption(cmd) => cmd_encryption(json, cmd).await,
         cli::Command::Ensure(cmd) => cmd_ensure(json, cmd).await,
         cli::Command::Discover(cmd) => cmd_discover(json, cmd).await,
     };
@@ -507,7 +508,7 @@ async fn cmd_remove(json: bool, cmd: cli::RemoveCmd) -> Result<()> {
     let store = store::get_store(&cmd.name)?;
     config::remove(&cmd.name)?;
     store.delete_tokens(&cmd.name)?;
-    store::file::delete_token_file(&cmd.name)?;
+    store::file::delete_token_files(&cmd.name)?;
 
     if json {
         println!("{{\"type\":\"remove\",\"version\":1,\"name\":\"{}\",\"status\":\"removed\"}}", cmd.name);
@@ -693,5 +694,224 @@ async fn cmd_discover(json: bool, cmd: cli::DiscoverCmd) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+// ─── odf encryption ─────────────────────────────────────────────────────
+
+async fn cmd_encryption(json: bool, cmd: cli::EncryptionCmd) -> Result<()> {
+    match cmd.command {
+        cli::EncryptionSubcommand::Generate(gen_cmd) => cmd_encryption_generate(json, gen_cmd),
+        cli::EncryptionSubcommand::Status(_) => cmd_encryption_status(json),
+        cli::EncryptionSubcommand::Export(_) => cmd_encryption_export(json),
+        cli::EncryptionSubcommand::Migrate(mig_cmd) => cmd_encryption_migrate(json, mig_cmd),
+    }
+}
+
+fn cmd_encryption_generate(json: bool, cmd: cli::EncryptionGenerateCmd) -> Result<()> {
+    use crate::encryption::{AgeIdentity, save_identity, identity_file_path};
+    
+    let key_path = identity_file_path()?;
+    
+    // Check if key already exists
+    if key_path.exists() && !cmd.force {
+        return Err(OdfError::Config(format!(
+            "Encryption key already exists at {}. Use --force to overwrite.",
+            key_path.display()
+        )));
+    }
+    
+    // Generate new identity
+    let identity = AgeIdentity::generate()?;
+    let secret = identity.secret().to_string();
+    let public = identity.public().to_string();
+    
+    // Save identity
+    save_identity(&key_path, &secret)?;
+    
+    if json {
+        let out = output::Envelope::new("encryption_generate", output::EncryptionGenerateOutput {
+            public_key: public.clone(),
+            key_file: key_path.display().to_string(),
+        });
+        println!("{}", out.to_json()?);
+    } else {
+        println!("Generated age encryption key:");
+        println!("  Key file: {}", key_path.display());
+        println!("  Public key: {}", public);
+        println!();
+        println!("Share the public key with your team to encrypt tokens for shared use.");
+        println!("Keep the key file secure - it can decrypt all stored tokens.");
+    }
+    
+    Ok(())
+}
+
+fn cmd_encryption_status(json: bool) -> Result<()> {
+    use crate::encryption::{is_encryption_enabled, load_identity, identity_file_path};
+    use std::fs;
+    
+    let key_path = identity_file_path()?;
+    let enabled = is_encryption_enabled();
+    
+    let (public_key, key_file) = if enabled {
+        let key_display = if let Ok(key) = std::env::var("ODF_AGE_PRIVATE_KEY") {
+            format!("(from ODF_AGE_PRIVATE_KEY, {} chars)", key.len())
+        } else if let Ok(path) = std::env::var("ODF_AGE_KEY_FILE") {
+            format!("{} (from ODF_AGE_KEY_FILE)", path)
+        } else {
+            key_path.display().to_string()
+        };
+        
+        let pub_key = load_identity().ok().map(|id| id.public().to_string());
+        (pub_key, Some(key_display))
+    } else {
+        (None, None)
+    };
+    
+    // Count encrypted vs plain tokens
+    let tokens_dir = store::file::tokens_dir()?;
+    let mut encrypted_count = 0;
+    let mut plain_count = 0;
+    
+    if tokens_dir.exists() {
+        for entry in fs::read_dir(&tokens_dir)? {
+            let entry = entry?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.ends_with(".json.age") {
+                encrypted_count += 1;
+            } else if name.ends_with(".json") {
+                plain_count += 1;
+            }
+        }
+    }
+    
+    if json {
+        let out = output::Envelope::new("encryption_status", output::EncryptionStatusOutput {
+            enabled,
+            key_file,
+            public_key,
+            encrypted_tokens: encrypted_count,
+            plain_tokens: plain_count,
+        });
+        println!("{}", out.to_json()?);
+    } else {
+        println!("Encryption: {}", if enabled { "enabled" } else { "disabled" });
+        if let Some(ref kf) = key_file {
+            println!("Key file: {}", kf);
+        }
+        if let Some(ref pk) = public_key {
+            println!("Public key: {}", pk);
+        }
+        println!("Tokens: {} encrypted, {} plain", encrypted_count, plain_count);
+    }
+    
+    Ok(())
+}
+
+fn cmd_encryption_export(json: bool) -> Result<()> {
+    use crate::encryption::load_identity;
+    
+    let identity = load_identity()?;
+    let public_key = identity.public().to_string();
+    
+    if json {
+        let out = output::Envelope::new("encryption_export", output::EncryptionExportOutput {
+            public_key: public_key.clone(),
+        });
+        println!("{}", out.to_json()?);
+    } else {
+        println!("{}", public_key);
+    }
+    
+    Ok(())
+}
+
+fn cmd_encryption_migrate(json: bool, cmd: cli::EncryptionMigrateCmd) -> Result<()> {
+    use crate::encryption::{is_encryption_enabled, encrypt_to_string};
+    use std::fs;
+    
+    if !is_encryption_enabled() {
+        return Err(OdfError::Config(
+            "Encryption not enabled. Run 'odf encryption generate' first.".into()
+        ));
+    }
+    
+    let tokens_dir = store::file::tokens_dir()?;
+    if !tokens_dir.exists() {
+        if json {
+            let out = output::Envelope::new("encryption_migrate", output::EncryptionMigrateOutput {
+                migrated: 0,
+                skipped: 0,
+                tokens: vec![],
+            });
+            println!("{}", out.to_json()?);
+        } else {
+            println!("No tokens to migrate.");
+        }
+        return Ok(());
+    }
+    
+    let mut migrated = Vec::new();
+    let mut skipped = Vec::new();
+    
+    for entry in fs::read_dir(&tokens_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        
+        // Only migrate .json files (not .json.age)
+        if !name.ends_with(".json") {
+            continue;
+        }
+        
+        // Skip if already encrypted
+        let encrypted_path = path.with_extension("json.age");
+        if encrypted_path.exists() {
+            skipped.push(name);
+            continue;
+        }
+        
+        // Read token data
+        let content = fs::read_to_string(&path)?;
+        
+        // Encrypt
+        let encrypted = encrypt_to_string(&content)?;
+        
+        if cmd.dry_run {
+            migrated.push(name);
+        } else {
+            // Write encrypted
+            fs::write(&encrypted_path, &encrypted)?;
+            // Remove plain
+            fs::remove_file(&path)?;
+            migrated.push(name);
+        }
+    }
+    
+    if json {
+        let out = output::Envelope::new("encryption_migrate", output::EncryptionMigrateOutput {
+            migrated: migrated.len(),
+            skipped: skipped.len(),
+            tokens: migrated.clone(),
+        });
+        println!("{}", out.to_json()?);
+    } else {
+        if cmd.dry_run {
+            println!("Dry run - would migrate {} tokens:", migrated.len());
+        } else {
+            println!("Migrated {} tokens:", migrated.len());
+        }
+        for name in &migrated {
+            println!("  - {}", name);
+        }
+        if !skipped.is_empty() {
+            println!("Skipped {} (already encrypted):", skipped.len());
+            for name in &skipped {
+                println!("  - {}", name);
+            }
+        }
+    }
+    
     Ok(())
 }

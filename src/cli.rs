@@ -43,6 +43,8 @@ pub enum Command {
     ConfigExport(ConfigExportCmd),
     /// Show configuration paths and status
     Config(ConfigCmd),
+    /// Manage encryption for tokens
+    Encryption(EncryptionCmd),
     /// Ensure a valid token exists (check → refresh → login prompt)
     Ensure(EnsureCmd),
     /// Force-refresh OIDC discovery cache
@@ -196,6 +198,45 @@ pub struct EnsureCmd {
 pub struct DiscoverCmd {
     /// Provider name
     pub name: String,
+}
+
+#[derive(clap::Args)]
+pub struct EncryptionCmd {
+    /// Encryption subcommand
+    #[command(subcommand)]
+    pub command: EncryptionSubcommand,
+}
+
+#[derive(clap::Subcommand)]
+pub enum EncryptionSubcommand {
+    /// Generate a new age encryption key
+    Generate(EncryptionGenerateCmd),
+    /// Show encryption status
+    Status(EncryptionStatusCmd),
+    /// Export public key
+    Export(EncryptionExportCmd),
+    /// Migrate existing tokens to encrypted storage
+    Migrate(EncryptionMigrateCmd),
+}
+
+#[derive(clap::Args)]
+pub struct EncryptionGenerateCmd {
+    /// Overwrite existing key
+    #[arg(long)]
+    pub force: bool,
+}
+
+#[derive(clap::Args)]
+pub struct EncryptionStatusCmd;
+
+#[derive(clap::Args)]
+pub struct EncryptionExportCmd;
+
+#[derive(clap::Args)]
+pub struct EncryptionMigrateCmd {
+    /// Show what would be migrated without making changes
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Clone, ValueEnum)]

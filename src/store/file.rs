@@ -1,3 +1,4 @@
+use crate::encryption::{decrypt_from_string, encrypt_to_string, is_encryption_enabled};
 use crate::error::{OdfError, Result};
 use crate::store::TokenStore;
 use dirs::data_local_dir;
@@ -57,6 +58,14 @@ fn token_path(name: &str) -> Result<PathBuf> {
     Ok(tokens_dir()?.join(format!("{name}.json")))
 }
 
+/// Path for encrypted token (.json.age)
+fn encrypted_token_path(name: &str) -> Result<PathBuf> {
+    if name.contains('/') || name.contains("..") {
+        return Err(OdfError::Store("Token name cannot contain '/' or '..'".into()));
+    }
+    Ok(tokens_dir()?.join(format!("{name}.json.age")))
+}
+
 /// Ensure the tokens directory exists with 0o700 permissions.
 fn ensure_tokens_dir() -> Result<PathBuf> {
     let dir = tokens_dir()?;
@@ -78,107 +87,125 @@ fn atomic_write(path: &PathBuf, content: &str, mode: u32) -> Result<()> {
     Ok(())
 }
 
-/// Load unified token info from disk.
-pub fn load_token_info(name: &str) -> Result<Option<TokenInfo>> {
-    let path = token_path(name)?;
-    if !path.exists() {
-        return Ok(None);
-    }
-    let content = fs::read_to_string(&path)?;
+// ─── TokenStore implementation ───
 
-    // Try TokenData first
-    if let Ok(data) = serde_json::from_str::<TokenData>(&content) {
-        return Ok(Some(TokenInfo {
-            expires_at: data.expires_at,
-            scope: data.scope,
-            token_type: data.token_type,
-        }));
-    }
-
-    // Try TokenMetadata
-    if let Ok(meta) = serde_json::from_str::<TokenMetadata>(&content) {
-        return Ok(Some(TokenInfo {
-            expires_at: meta.expires_at,
-            scope: meta.scope,
-            token_type: meta.token_type,
-        }));
-    }
-
-    Err(OdfError::Store(format!("Cannot parse token file for '{name}'")))
-}
-
-/// File-backed token store: secrets stored in JSON files with chmod 600.
 pub struct FileTokenStore;
 
 impl TokenStore for FileTokenStore {
     fn get_access_token(&self, name: &str) -> Result<Option<String>> {
-        let data = load_full_token_data(name)?;
+        let data = load_token_data(name)?;
         Ok(data.map(|d| d.access_token))
     }
 
     fn get_refresh_token(&self, name: &str) -> Result<Option<String>> {
-        let data = load_full_token_data(name)?;
+        let data = load_token_data(name)?;
         Ok(data.and_then(|d| d.refresh_token))
     }
 
-    fn set_access_token(&self, name: &str, token: &str) -> Result<()> {
-        let mut data = load_full_token_data(name)?.unwrap_or(TokenData {
-            access_token: String::new(),
-            refresh_token: None,
-            token_type: "Bearer".into(),
-            expires_at: 0,
-            scope: String::new(),
-        });
-        data.access_token = token.to_string();
-        save_token_data(name, &data)
+    fn set_access_token(&self, _name: &str, _token: &str) -> Result<()> {
+        // Not used - we save full TokenData instead
+        Err(OdfError::Store("Use save_token_data instead".into()))
     }
 
-    fn set_refresh_token(&self, name: &str, token: &str) -> Result<()> {
-        let mut data = load_full_token_data(name)?.unwrap_or(TokenData {
-            access_token: String::new(),
-            refresh_token: None,
-            token_type: "Bearer".into(),
-            expires_at: 0,
-            scope: String::new(),
-        });
-        data.refresh_token = Some(token.to_string());
-        save_token_data(name, &data)
+    fn set_refresh_token(&self, _name: &str, _token: &str) -> Result<()> {
+        // Not used - we save full TokenData instead
+        Err(OdfError::Store("Use save_token_data instead".into()))
     }
 
     fn delete_tokens(&self, name: &str) -> Result<()> {
-        let path = token_path(name)?;
-        if path.exists() {
-            fs::remove_file(&path)?;
-        }
-        Ok(())
+        delete_token_files(name)
     }
 }
 
-/// Save full token data atomically with chmod 600.
+/// Load token info (metadata only, no secrets).
+pub fn load_token_info(name: &str) -> Result<Option<TokenInfo>> {
+    let data = load_token_data(name)?;
+    Ok(data.map(|d| TokenInfo {
+        expires_at: d.expires_at,
+        scope: d.scope,
+        token_type: d.token_type,
+    }))
+}
+
+/// Save full token data.
+/// If encryption is enabled, encrypts before writing to .json.age.
+/// Otherwise writes plain JSON to .json.
 pub fn save_token_data(name: &str, data: &TokenData) -> Result<()> {
     ensure_tokens_dir()?;
-    let path = token_path(name)?;
-    let json = serde_json::to_string_pretty(data)?;
-    atomic_write(&path, &json, 0o600)
+    
+    if is_encryption_enabled() {
+        let encrypted_path = encrypted_token_path(name)?;
+        let plain_path = token_path(name)?;
+        
+        // Encrypt and save
+        let json = serde_json::to_string_pretty(data)?;
+        let encrypted = encrypt_to_string(&json)?;
+        atomic_write(&encrypted_path, &encrypted, 0o600)?;
+        
+        // Remove any existing plain file
+        if plain_path.exists() {
+            fs::remove_file(&plain_path)?;
+        }
+    } else {
+        let path = token_path(name)?;
+        let json = serde_json::to_string_pretty(data)?;
+        atomic_write(&path, &json, 0o600)?;
+        
+        // Remove any existing encrypted file
+        let encrypted_path = encrypted_token_path(name)?;
+        if encrypted_path.exists() {
+            fs::remove_file(&encrypted_path)?;
+        }
+    }
+    
+    Ok(())
+}
+
+/// Delete both encrypted and plain token files for a provider.
+pub fn delete_token_files(name: &str) -> Result<()> {
+    let plain_path = token_path(name)?;
+    let encrypted_path = encrypted_token_path(name)?;
+    
+    if plain_path.exists() {
+        fs::remove_file(&plain_path)?;
+    }
+    if encrypted_path.exists() {
+        fs::remove_file(&encrypted_path)?;
+    }
+    
+    Ok(())
 }
 
 /// Load full token data from disk.
-fn load_full_token_data(name: &str) -> Result<Option<TokenData>> {
-    let path = token_path(name)?;
-    if !path.exists() {
+/// Tries .json.age (encrypted) first, then .json (plain).
+fn load_token_data(name: &str) -> Result<Option<TokenData>> {
+    // Try encrypted first
+    let encrypted_path = encrypted_token_path(name)?;
+    if encrypted_path.exists() {
+        let content = fs::read_to_string(&encrypted_path)?;
+        let decrypted = decrypt_from_string(&content)?;
+        let data: TokenData = serde_json::from_str(&decrypted)?;
+        return Ok(Some(data));
+    }
+    
+    // Try plain
+    let plain_path = token_path(name)?;
+    if !plain_path.exists() {
         return Ok(None);
     }
-    let content = fs::read_to_string(&path)?;
+    
+    let content = fs::read_to_string(&plain_path)?;
     match serde_json::from_str::<TokenData>(&content) {
         Ok(data) => Ok(Some(data)),
         Err(_) => {
-            // File is in metadata-only format — no secrets on disk
+            // File might be old metadata-only format
             Ok(None)
         }
     }
 }
 
-/// Save only metadata (non-secret part) — used when secrets go to keyring.
+/// Save only metadata (non-secret part).
+#[allow(dead_code)]
 pub fn save_metadata(name: &str, meta: &TokenMetadata) -> Result<()> {
     ensure_tokens_dir()?;
     let path = token_path(name)?;
@@ -186,11 +213,14 @@ pub fn save_metadata(name: &str, meta: &TokenMetadata) -> Result<()> {
     atomic_write(&path, &json, 0o600)
 }
 
-/// Delete token data for a provider.
-pub fn delete_token_file(name: &str) -> Result<()> {
-    let path = token_path(name)?;
-    if path.exists() {
-        fs::remove_file(&path)?;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_token_path_no_traversal() {
+        assert!(token_path("../../../etc/passwd").is_err());
+        assert!(token_path("foo/bar").is_err());
+        assert!(token_path("valid-name").is_ok());
     }
-    Ok(())
 }

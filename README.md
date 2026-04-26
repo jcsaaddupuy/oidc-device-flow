@@ -40,6 +40,70 @@ curl -H "Authorization: Bearer $(odf token entra)" \
   https://graph.microsoft.com/v1.0/me
 ```
 
+## Token Encryption
+
+Tokens can be encrypted at rest using age encryption. This protects tokens stored on disk from casual access.
+
+### Enable Encryption
+
+```bash
+# Generate encryption key
+odf encryption generate
+> Generated age encryption key:
+>   Key file: ~/.config/odf/encryption/identity
+>   Public key: age1...
+
+# Check status
+odf encryption status
+> Encryption: enabled
+> Key file: ~/.config/odf/encryption/identity
+> Public key: age1...
+> Tokens: 3 encrypted, 0 plain
+```
+
+### Migrate Existing Tokens
+
+```bash
+# Encrypt all plain tokens
+odf encryption migrate
+> Migrated 3 tokens:
+>   - github.json
+>   - gitlab.json
+>   - entra.json
+
+# Dry run
+odf encryption migrate --dry-run
+```
+
+### Share Public Key
+
+```bash
+# Export public key for team members
+odf encryption export > age-pub.txt
+
+# Team members can encrypt tokens for you:
+age -r age1... -o token.json.age token.json
+```
+
+### Environment Variables
+
+For CI/CD or automation without key files:
+
+```bash
+# Inline keys (no file needed)
+export ODF_AGE_PRIVATE_KEY="AGE-SECRET-KEY-1..."
+export ODF_AGE_PUBLIC_KEY="age1..."
+
+# Custom key file
+export ODF_AGE_KEY_FILE="/path/to/identity"
+```
+
+### Security
+
+- Private key is stored in `~/.config/odf/encryption/identity` (chmod 600)
+- Tokens are encrypted to `~/.local/share/odf/tokens/{name}.json.age`
+- Decryption happens on-demand per command (no caching)
+- Use environment variables in ephemeral environments
 
 ## Commands
 

@@ -300,6 +300,39 @@ impl ErrorOutput {
     }
 }
 
+// ─── Encryption output types ───
+
+/// `odf encryption generate` output
+#[derive(Serialize)]
+pub struct EncryptionGenerateOutput {
+    pub public_key: String,
+    pub key_file: String,
+}
+
+/// `odf encryption status` output
+#[derive(Serialize)]
+pub struct EncryptionStatusOutput {
+    pub enabled: bool,
+    pub key_file: Option<String>,
+    pub public_key: Option<String>,
+    pub encrypted_tokens: usize,
+    pub plain_tokens: usize,
+}
+
+/// `odf encryption export` output
+#[derive(Serialize)]
+pub struct EncryptionExportOutput {
+    pub public_key: String,
+}
+
+/// `odf encryption migrate` output
+#[derive(Serialize)]
+pub struct EncryptionMigrateOutput {
+    pub migrated: usize,
+    pub skipped: usize,
+    pub tokens: Vec<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
