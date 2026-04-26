@@ -34,7 +34,7 @@ curl -H "Authorization: Bearer $(odf token github)" https://api.github.com/user
 | `odf status <name>` | Show token health, expiry, scopes |
 | `odf list` | List all providers and token status |
 | `odf remove <name>` | Remove provider and its tokens |
-| `odf config` | Show configuration paths, keyring status |
+| `odf config` | Show configuration paths and status |
 | `odf config export [name]` | Export provider config as TOML (no secrets) |
 | `odf discover <name>` | Force-refresh OIDC discovery cache |
 
@@ -54,7 +54,7 @@ When captured or piped, the full token flows so commands work transparently:
 ```bash
 curl -H "Authorization: Bearer $(odf token myapp)" https://api.example.com/me  # full token
 odf token myapp | wc -c   # full token
-odf token myapp > /tmp/t  # full token
+odf token myapp > /tmp/t  # redacted (file redirect)
 ```
 
 Use `--reveal` to show the full token on a terminal:
@@ -147,6 +147,25 @@ eval "$(odf token --all --format env)"
 
 ## Examples
 
+### Microsoft Entra ID (Azure AD)
+
+```bash
+# Register Entra ID provider
+# Replace <tenant-id>, <client-id> with your values
+odf add entra \
+  --issuer-url https://login.microsoftonline.com/<tenant-id>/v2.0 \
+  --device-auth-endpoint https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/devicecode \
+  --client-id <client-id> \
+  --scopes "openid,profile,User.Read"
+
+# Authenticate
+odf login entra
+
+# Use the token with Microsoft Graph API
+curl -H "Authorization: Bearer $(odf token entra)" \
+  https://graph.microsoft.com/v1.0/me
+```
+
 ### Self-hosted OIDC (Dex) with self-signed certs
 
 ```bash
@@ -196,18 +215,6 @@ odf add legacy \
   --scopes openid
 ```
 
-### Token storage
-
-By default, `odf` uses the OS keychain (macOS Keychain, Windows Credential Manager, Linux secret-service). Falls back to file-based storage if keyring is unavailable.
-
-```bash
-# Force file-based storage
-odf add myapp --store file --client-id abc --issuer-url https://...
-
-# Force keyring
-odf add myapp --store keyring --client-id abc --issuer-url https://...
-```
-
 ### Verify token with introspection
 
 ```bash
@@ -226,12 +233,8 @@ odf status myapp --verify
 
 ## Configuration
 
-- Provider configs: `~/.config/odf/providers/<name>.toml`
+- Provider configs: `~/.config/odf/providers/<name>.toml` (or `~/Library/Application Support/odf/providers/` on macOS)
 - Token data: `~/.local/share/odf/tokens/<name>.json` (chmod 600)
 - Discovery cache: `~/.cache/odf/discovery/<name>.json`
 
-## Building without keyring
-
-```bash
-cargo install --no-default-features  # pure file-based token storage
-```
+All paths respect `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME` environment variables.

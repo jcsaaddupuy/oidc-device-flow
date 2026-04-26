@@ -23,14 +23,6 @@ indicatif = "0.17"
 thiserror = "2"
 atty = "0.2"
 
-[features]
-default = ["keyring"]
-keyring = ["dep:keyring"]
-
-[dependencies.keyring]
-version = "3"
-optional = true
-
 [dev-dependencies]
 tempfile = "3"
 assert_cmd = "2"

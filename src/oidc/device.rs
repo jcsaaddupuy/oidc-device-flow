@@ -1,7 +1,7 @@
 use crate::config::ProviderConfig;
 use crate::error::{OdfError, Result};
 use crate::oidc::discovery;
-use crate::store::file::{self, TokenData, TokenMetadata};
+use crate::store::file::{self, TokenData};
 use crate::store::TokenStore;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::Deserialize;
@@ -173,43 +173,20 @@ pub async fn poll_for_token(
     }
 }
 
-/// Save login result using the appropriate store backend.
-pub fn save_login_result(name: &str, store: &dyn TokenStore, result: &LoginResult) -> Result<()> {
+/// Save login result to file storage.
+pub fn save_login_result(name: &str, _store: &dyn TokenStore, result: &LoginResult) -> Result<()> {
     let expires_at = chrono::Utc::now().timestamp() + result.expires_in as i64;
 
-    if config_store_is_keyring(name)? {
-        // Secrets to keyring, metadata to file
-        store.set_access_token(name, &result.access_token)?;
-        if let Some(ref rt) = result.refresh_token {
-            store.set_refresh_token(name, rt)?;
-        }
-        let meta = TokenMetadata {
-            token_type: result.token_type.clone(),
-            expires_at,
-            scope: result.scope.clone(),
-            store: "keyring".into(),
-        };
-        file::save_metadata(name, &meta)?;
-    } else {
-        // Everything to file
-        let data = TokenData {
-            access_token: result.access_token.clone(),
-            refresh_token: result.refresh_token.clone(),
-            token_type: result.token_type.clone(),
-            expires_at,
-            scope: result.scope.clone(),
-        };
-        file::save_token_data(name, &data)?;
-    }
+    let data = TokenData {
+        access_token: result.access_token.clone(),
+        refresh_token: result.refresh_token.clone(),
+        token_type: result.token_type.clone(),
+        expires_at,
+        scope: result.scope.clone(),
+    };
+    file::save_token_data(name, &data)?;
 
     Ok(())
-}
-
-fn config_store_is_keyring(name: &str) -> Result<bool> {
-    match crate::config::load(name) {
-        Ok(cfg) => Ok(cfg.store == "keyring"),
-        Err(_) => Ok(false),
-    }
 }
 
 /// Resolve the device authorization endpoint from config or discovery.

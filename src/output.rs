@@ -81,7 +81,6 @@ impl<T: Serialize> Envelope<T> {
 #[derive(Serialize)]
 pub struct AddOutput {
     pub name: String,
-    pub store: String,
     pub issuer_url: Option<String>,
     pub insecure: bool,
 }
@@ -110,7 +109,6 @@ pub struct TokenOutput {
     pub access_token: String,
     pub expires_at: i64,
     pub scope: String,
-    pub store: String,
     pub expired: bool,
     pub sensitive: bool,
 }
@@ -144,7 +142,6 @@ pub struct StatusOutput {
     pub valid: bool,
     pub expires_at: Option<i64>,
     pub scope: Option<String>,
-    pub store: Option<String>,
     pub refreshable: bool,
     pub introspected: Option<IntrospectInfo>,
 }
@@ -169,7 +166,6 @@ pub struct ConfigOutput {
     pub paths: ConfigPaths,
     pub exists: ConfigExists,
     pub counts: ConfigCounts,
-    pub keyring: KeyringInfo,
 }
 
 #[derive(Serialize)]
@@ -193,12 +189,6 @@ pub struct ConfigExists {
 pub struct ConfigCounts {
     pub providers: usize,
     pub tokens: usize,
-}
-
-#[derive(Serialize)]
-pub struct KeyringInfo {
-    pub feature_enabled: bool,
-    pub available: bool,
 }
 
 /// `odf introspect` — no secrets

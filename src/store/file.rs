@@ -6,19 +6,16 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
-/// Token metadata stored on disk (non-secret fields).
-/// When store=keyring, secrets live in the OS keychain — this is all that's on disk.
-/// When store=file, the full TokenData is on disk instead.
+/// Token metadata stored on disk.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenMetadata {
     pub token_type: String,
     pub expires_at: i64,
     pub scope: String,
-    pub store: String,
 }
 
 /// Full token data as returned by the OIDC token endpoint.
-/// Stored on disk when store=file.
+/// Stored on disk.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenData {
     pub access_token: String,
@@ -28,15 +25,13 @@ pub struct TokenData {
     pub scope: String,
 }
 
-/// Unified token info loaded from disk — works for both file and keyring stores.
+/// Unified token info loaded from disk.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct TokenInfo {
     pub expires_at: i64,
     pub scope: String,
     pub token_type: String,
-    pub store: String,
-    pub has_file_data: bool,
 }
 
 pub fn data_dir() -> Result<PathBuf> {
@@ -84,7 +79,6 @@ fn atomic_write(path: &PathBuf, content: &str, mode: u32) -> Result<()> {
 }
 
 /// Load unified token info from disk.
-/// Tries TokenData first (file store), then TokenMetadata (keyring store).
 pub fn load_token_info(name: &str) -> Result<Option<TokenInfo>> {
     let path = token_path(name)?;
     if !path.exists() {
@@ -92,25 +86,21 @@ pub fn load_token_info(name: &str) -> Result<Option<TokenInfo>> {
     }
     let content = fs::read_to_string(&path)?;
 
-    // Try TokenData first (file store format)
+    // Try TokenData first
     if let Ok(data) = serde_json::from_str::<TokenData>(&content) {
         return Ok(Some(TokenInfo {
             expires_at: data.expires_at,
             scope: data.scope,
             token_type: data.token_type,
-            store: "file".to_string(),
-            has_file_data: true,
         }));
     }
 
-    // Try TokenMetadata (keyring store format)
+    // Try TokenMetadata
     if let Ok(meta) = serde_json::from_str::<TokenMetadata>(&content) {
         return Ok(Some(TokenInfo {
             expires_at: meta.expires_at,
             scope: meta.scope,
             token_type: meta.token_type,
-            store: meta.store,
-            has_file_data: false,
         }));
     }
 
@@ -172,7 +162,7 @@ pub fn save_token_data(name: &str, data: &TokenData) -> Result<()> {
     atomic_write(&path, &json, 0o600)
 }
 
-/// Load full token data from disk (only works for file store format).
+/// Load full token data from disk.
 fn load_full_token_data(name: &str) -> Result<Option<TokenData>> {
     let path = token_path(name)?;
     if !path.exists() {
@@ -182,7 +172,7 @@ fn load_full_token_data(name: &str) -> Result<Option<TokenData>> {
     match serde_json::from_str::<TokenData>(&content) {
         Ok(data) => Ok(Some(data)),
         Err(_) => {
-            // File is in metadata-only format (keyring store) — no secrets on disk
+            // File is in metadata-only format — no secrets on disk
             Ok(None)
         }
     }

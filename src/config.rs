@@ -10,16 +10,9 @@ pub struct ProviderConfig {
     pub scopes: Vec<String>,
     pub audience: Option<String>,
     pub extra_params: Option<toml::Value>,
-    /// "keyring" or "file" — determines where secrets are stored
-    #[serde(default = "default_store")]
-    pub store: String,
     /// Skip TLS verification (for self-hosted providers with self-signed certs)
     #[serde(default)]
     pub insecure: bool,
-}
-
-fn default_store() -> String {
-    "file".to_string()
 }
 
 impl ProviderConfig {

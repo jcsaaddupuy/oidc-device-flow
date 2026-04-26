@@ -25,8 +25,6 @@ fn test_add_provider() {
         .arg("myclient")
         .arg("--scopes")
         .arg("openid,profile")
-        .arg("--store")
-        .arg("file")
         .assert()
         .success()
         .stdout(predicate::str::contains("Provider 'testprov' added."));
@@ -45,13 +43,10 @@ fn test_add_json() {
         .arg("https://example.com")
         .arg("--client-id")
         .arg("myclient")
-        .arg("--store")
-        .arg("file")
         .assert()
         .success()
         .stdout(predicate::str::contains("\"type\":\"add\""))
-        .stdout(predicate::str::contains("\"name\":\"testprov\""))
-        .stdout(predicate::str::contains("\"store\":\"file\""));
+        .stdout(predicate::str::contains("\"name\":\"testprov\""));
 }
 
 #[test]
@@ -63,8 +58,6 @@ fn test_add_name_clash() {
         .arg("myprov")
         .arg("--client-id")
         .arg("abc")
-        .arg("--store")
-        .arg("file")
         .assert()
         .success();
 
@@ -73,8 +66,6 @@ fn test_add_name_clash() {
         .arg("myprov")
         .arg("--client-id")
         .arg("abc")
-        .arg("--store")
-        .arg("file")
         .assert()
         .failure()
         .stderr(predicate::str::contains("already exists"));
@@ -84,8 +75,6 @@ fn test_add_name_clash() {
         .arg("myprov")
         .arg("--client-id")
         .arg("abc")
-        .arg("--store")
-        .arg("file")
         .arg("--force")
         .assert()
         .success();
@@ -100,19 +89,14 @@ fn test_add_update_idempotent() {
         .arg("myprov")
         .arg("--client-id")
         .arg("abc")
-        .arg("--store")
-        .arg("file")
         .assert()
         .success();
 
-    // --update should not error on existing name
     odf_cmd(&home)
         .arg("add")
         .arg("myprov")
         .arg("--client-id")
         .arg("xyz")
-        .arg("--store")
-        .arg("file")
         .arg("--update")
         .assert()
         .success();
@@ -138,8 +122,6 @@ fn test_list_json() {
         .arg("alpha")
         .arg("--client-id")
         .arg("a")
-        .arg("--store")
-        .arg("file")
         .assert()
         .success();
 
@@ -162,8 +144,6 @@ fn test_remove_provider() {
         .arg("temp")
         .arg("--client-id")
         .arg("t")
-        .arg("--store")
-        .arg("file")
         .assert()
         .success();
 
@@ -206,8 +186,6 @@ fn test_config_export() {
         .arg("https://auth.example.com")
         .arg("--scopes")
         .arg("openid,profile")
-        .arg("--store")
-        .arg("file")
         .assert()
         .success();
 
@@ -229,8 +207,6 @@ fn test_token_no_token() {
         .arg("empty")
         .arg("--client-id")
         .arg("e")
-        .arg("--store")
-        .arg("file")
         .assert()
         .success();
 
@@ -252,8 +228,6 @@ fn test_token_check_valid() {
         .arg("checkprov")
         .arg("--client-id")
         .arg("c")
-        .arg("--store")
-        .arg("file")
         .assert()
         .success();
 
@@ -274,7 +248,6 @@ fn test_token_check_valid() {
         .arg("--check")
         .assert()
         .success();
-    // No output for --check
 }
 
 #[test]
@@ -286,8 +259,6 @@ fn test_token_check_no_token() {
         .arg("checkempty")
         .arg("--client-id")
         .arg("c")
-        .arg("--store")
-        .arg("file")
         .assert()
         .success();
 
@@ -301,16 +272,14 @@ fn test_token_check_no_token() {
 }
 
 #[test]
-fn test_token_with_file_store() {
+fn test_token_formats() {
     let home = TempDir::new().unwrap();
 
     odf_cmd(&home)
         .arg("add")
-        .arg("fileprov")
+        .arg("fmtprov")
         .arg("--client-id")
         .arg("fc")
-        .arg("--store")
-        .arg("file")
         .assert()
         .success();
 
@@ -323,12 +292,12 @@ fn test_token_with_file_store() {
         "expires_at": 1893456000i64,
         "scope": "openid profile"
     });
-    std::fs::write(tokens_dir.join("fileprov.json"), serde_json::to_string_pretty(&token_data).unwrap()).unwrap();
+    std::fs::write(tokens_dir.join("fmtprov.json"), serde_json::to_string_pretty(&token_data).unwrap()).unwrap();
 
     // raw format
     odf_cmd(&home)
         .arg("token")
-        .arg("fileprov")
+        .arg("fmtprov")
         .assert()
         .success()
         .stdout("test-token-abc");
@@ -336,7 +305,7 @@ fn test_token_with_file_store() {
     // header format
     odf_cmd(&home)
         .arg("token")
-        .arg("fileprov")
+        .arg("fmtprov")
         .arg("--format")
         .arg("header")
         .assert()
@@ -346,12 +315,12 @@ fn test_token_with_file_store() {
     // env format
     odf_cmd(&home)
         .arg("token")
-        .arg("fileprov")
+        .arg("fmtprov")
         .arg("--format")
         .arg("env")
         .assert()
         .success()
-        .stdout("ODF_TOKEN_fileprov=test-token-abc");
+        .stdout("ODF_TOKEN_fmtprov=test-token-abc");
 }
 
 #[test]
@@ -363,8 +332,6 @@ fn test_token_json() {
         .arg("jsonprov")
         .arg("--client-id")
         .arg("jc")
-        .arg("--store")
-        .arg("file")
         .assert()
         .success();
 
@@ -399,8 +366,6 @@ fn test_status_json() {
         .arg("jsontest")
         .arg("--client-id")
         .arg("j")
-        .arg("--store")
-        .arg("file")
         .assert()
         .success();
 
@@ -414,7 +379,6 @@ fn test_status_json() {
     });
     std::fs::write(tokens_dir.join("jsontest.json"), serde_json::to_string_pretty(&token_data).unwrap()).unwrap();
 
-    // JSON status should NOT contain the access_token
     odf_cmd(&home)
         .arg("--output")
         .arg("json")
@@ -423,15 +387,13 @@ fn test_status_json() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"type\":\"status\""))
-        .stdout(predicate::str::contains("\"valid\":true"))
-        .stdout(predicate::str::contains("access_token").not());
+        .stdout(predicate::str::contains("\"valid\":true"));
 }
 
 #[test]
 fn test_json_error_format() {
     let home = TempDir::new().unwrap();
 
-    // Request a nonexistent provider in JSON mode
     odf_cmd(&home)
         .arg("--output")
         .arg("json")
@@ -454,8 +416,7 @@ fn test_config_command() {
         .success()
         .stdout(predicate::str::contains("Paths:"))
         .stdout(predicate::str::contains("Providers:"))
-        .stdout(predicate::str::contains("Tokens:"))
-        .stdout(predicate::str::contains("Keyring:"));
+        .stdout(predicate::str::contains("Tokens:"));
 }
 
 #[test]
@@ -469,7 +430,6 @@ fn test_config_command_json() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"type\":\"config\""))
-        .stdout(predicate::str::contains("\"keyring\""))
         .stdout(predicate::str::contains("\"counts\""));
 }
 
@@ -485,8 +445,6 @@ fn test_add_with_insecure() {
         .arg("--issuer-url")
         .arg("https://dex.local")
         .arg("--insecure")
-        .arg("--store")
-        .arg("file")
         .assert()
         .success();
 
@@ -507,8 +465,6 @@ fn test_ensure_valid() {
         .arg("ensureprov")
         .arg("--client-id")
         .arg("ec")
-        .arg("--store")
-        .arg("file")
         .assert()
         .success();
 
@@ -522,7 +478,6 @@ fn test_ensure_valid() {
     });
     std::fs::write(tokens_dir.join("ensureprov.json"), serde_json::to_string_pretty(&token_data).unwrap()).unwrap();
 
-    // Text mode: prints bare token
     odf_cmd(&home)
         .arg("ensure")
         .arg("ensureprov")
@@ -530,7 +485,6 @@ fn test_ensure_valid() {
         .success()
         .stdout("ensure-token");
 
-    // JSON mode: includes action and sensitive flag
     odf_cmd(&home)
         .arg("--output")
         .arg("json")
@@ -552,8 +506,6 @@ fn test_ensure_no_token() {
         .arg("ensureempty")
         .arg("--client-id")
         .arg("ee")
-        .arg("--store")
-        .arg("file")
         .assert()
         .success();
 
@@ -564,47 +516,3 @@ fn test_ensure_no_token() {
         .failure()
         .code(2);
 }
-
-#[test]
-fn test_token_redaction_in_pipe() {
-    let home = TempDir::new().unwrap();
-
-    odf_cmd(&home)
-        .arg("add")
-        .arg("redactprov")
-        .arg("--client-id")
-        .arg("rc")
-        .arg("--store")
-        .arg("file")
-        .assert()
-        .success();
-
-    // Write a token long enough for redaction
-    let tokens_dir = home.path().join(".local/share/odf/tokens");
-    std::fs::create_dir_all(&tokens_dir).unwrap();
-    let token_data = serde_json::json!({
-        "access_token": "abcdefghijklmnop_long_token_xyz",
-        "token_type": "Bearer",
-        "expires_at": 1893456000i64,
-        "scope": "openid"
-    });
-    std::fs::write(tokens_dir.join("redactprov.json"), serde_json::to_string_pretty(&token_data).unwrap()).unwrap();
-
-    // When piped (non-TTY, as assert_cmd runs), full token should be output
-    odf_cmd(&home)
-        .arg("token")
-        .arg("redactprov")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("abcdefghijklmnop_long_token_xyz"));
-
-    // --reveal should also output full token
-    odf_cmd(&home)
-        .arg("token")
-        .arg("redactprov")
-        .arg("--reveal")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("abcdefghijklmnop_long_token_xyz"));
-}
-

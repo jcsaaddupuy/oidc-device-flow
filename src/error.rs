@@ -44,10 +44,6 @@ pub enum OdfError {
 
     #[error("TOML error: {0}")]
     Toml(#[from] toml::de::Error),
-
-    #[error("Keyring error: {0}")]
-    #[cfg(feature = "keyring")]
-    Keyring(#[from] keyring::Error),
 }
 
 impl OdfError {

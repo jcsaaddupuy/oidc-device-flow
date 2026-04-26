@@ -78,9 +78,7 @@ pub struct AddCmd {
     #[arg(long)]
     pub audience: Option<String>,
 
-    /// Token storage backend: "keyring" or "file"
     #[arg(long)]
-    pub store: Option<String>,
 
     /// Extra parameters to include in token requests (key=value)
     #[arg(long, value_parser = parse_key_value)]

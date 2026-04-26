@@ -7,28 +7,6 @@ mod store;
 
 use error::{OdfError, Result};
 
-fn get_store(name: &str) -> Result<Box<dyn store::TokenStore>> {
-    let cfg = config::load(name);
-    let use_keyring = match cfg {
-        Ok(c) => c.store == "keyring",
-        Err(_) => false,
-    };
-
-    if use_keyring {
-        #[cfg(feature = "keyring")]
-        {
-            Ok(Box::new(store::keyring_store::KeyringTokenStore))
-        }
-        #[cfg(not(feature = "keyring"))]
-        {
-            eprintln!("Warning: keyring feature not compiled, falling back to file store");
-            Ok(Box::new(store::file::FileTokenStore))
-        }
-    } else {
-        Ok(Box::new(store::file::FileTokenStore))
-    }
-}
-
 #[tokio::main]
 async fn main() {
     let cli = cli::parse();
@@ -75,26 +53,6 @@ async fn cmd_add(json: bool, cmd: cli::AddCmd) -> Result<()> {
         return Err(OdfError::NameConflict(cmd.name));
     }
 
-    let store = if let Some(ref s) = cmd.store {
-        s.clone()
-    } else {
-        #[cfg(feature = "keyring")]
-        {
-            if store::keyring_store::probe_keyring() {
-                "keyring".to_string()
-            } else {
-                if !json {
-                    eprintln!("Warning: OS keyring unavailable, using file-based token storage");
-                }
-                "file".to_string()
-            }
-        }
-        #[cfg(not(feature = "keyring"))]
-        {
-            "file".to_string()
-        }
-    };
-
     let cfg = config::ProviderConfig {
         client_id: cmd.client_id.clone(),
         issuer_url: cmd.issuer_url.clone(),
@@ -103,7 +61,6 @@ async fn cmd_add(json: bool, cmd: cli::AddCmd) -> Result<()> {
         scopes: cmd.scopes,
         audience: cmd.audience,
         extra_params: cmd.extra_params,
-        store: store.clone(),
         insecure: cmd.insecure,
     };
 
@@ -112,7 +69,6 @@ async fn cmd_add(json: bool, cmd: cli::AddCmd) -> Result<()> {
     if json {
         let out = output::Envelope::new("add", output::AddOutput {
             name: cmd.name,
-            store,
             issuer_url: cmd.issuer_url,
             insecure: cmd.insecure,
         });
@@ -131,7 +87,7 @@ async fn cmd_login(json: bool, cmd: cli::LoginCmd) -> Result<()> {
 
     // If not --force, check if a valid token already exists
     if !cmd.force {
-        let store = get_store(&cmd.name)?;
+        let store = store::get_store(&cmd.name)?;
         if store.get_access_token(&cmd.name)?.is_some() {
             let info = store::file::load_token_info(&cmd.name)?;
             let expired = info.as_ref().map_or(true, |i| chrono::Utc::now().timestamp() > i.expires_at);
@@ -195,7 +151,7 @@ async fn cmd_login(json: bool, cmd: cli::LoginCmd) -> Result<()> {
     let result = oidc::device::poll_for_token(&cfg, &device_code, interval, cfg.insecure).await?;
 
     // Step 3: Save tokens
-    let store = get_store(&cmd.name)?;
+    let store = store::get_store(&cmd.name)?;
     let expires_at = chrono::Utc::now().timestamp() + result.expires_in as i64;
     let access_token = result.access_token.clone();
     let scope = result.scope.clone();
@@ -246,7 +202,7 @@ async fn cmd_token(json: bool, cmd: cli::TokenCmd) -> Result<()> {
     }
 
     let cfg = config::load(&cmd.name)?;
-    let store = get_store(&cmd.name)?;
+    let store = store::get_store(&cmd.name)?;
     let info = store::file::load_token_info(&cmd.name)?;
     let expired = info.as_ref().map_or(true, |i| chrono::Utc::now().timestamp() > i.expires_at);
 
@@ -259,7 +215,6 @@ async fn cmd_token(json: bool, cmd: cli::TokenCmd) -> Result<()> {
                     access_token: result.access_token,
                     expires_at: chrono::Utc::now().timestamp() + result.expires_in as i64,
                     scope: result.scope,
-                    store: cfg.store.clone(),
                     expired: false,
                     sensitive: true,
                 });
@@ -281,12 +236,10 @@ async fn cmd_token(json: bool, cmd: cli::TokenCmd) -> Result<()> {
     if json {
         let expires_at = info.as_ref().map(|i| i.expires_at).unwrap_or(0);
         let scope = info.as_ref().map(|i| i.scope.clone()).unwrap_or_default();
-        let store_name = info.as_ref().map(|i| i.store.clone()).unwrap_or_default();
         let out = output::Envelope::new("token", output::TokenOutput {
             access_token: token,
             expires_at,
             scope,
-            store: store_name,
             expired,
             sensitive: true,
         });
@@ -301,7 +254,7 @@ async fn cmd_token(json: bool, cmd: cli::TokenCmd) -> Result<()> {
 
 /// `odf token --check` — exit-code only, no output
 async fn cmd_token_check(cmd: &cli::TokenCmd) -> Result<()> {
-    let store = get_store(&cmd.name)?;
+    let store = store::get_store(&cmd.name)?;
     if store.get_access_token(&cmd.name)?.is_none() {
         return Err(OdfError::Auth("No token".into()));
     }
@@ -334,7 +287,7 @@ async fn cmd_token_all(json: bool, cmd: &cli::TokenCmd) -> Result<()> {
 
     let mut entries = Vec::new();
     for name in &names {
-        let store = get_store(name)?;
+        let store = store::get_store(name)?;
         if let Some(token) = store.get_access_token(name)? {
             let info = store::file::load_token_info(name)?;
             let expires_at = info.as_ref().map(|i| i.expires_at).unwrap_or(0);
@@ -368,7 +321,7 @@ async fn cmd_token_all(json: bool, cmd: &cli::TokenCmd) -> Result<()> {
 
 async fn cmd_refresh(json: bool, cmd: cli::RefreshCmd) -> Result<()> {
     let cfg = config::load(&cmd.name)?;
-    let store = get_store(&cmd.name)?;
+    let store = store::get_store(&cmd.name)?;
 
     let result = oidc::refresh::refresh_token(&cmd.name, &cfg, store.as_ref()).await?;
     let expires_at = chrono::Utc::now().timestamp() + result.expires_in as i64;
@@ -392,13 +345,13 @@ async fn cmd_refresh(json: bool, cmd: cli::RefreshCmd) -> Result<()> {
 
 async fn cmd_status(json: bool, cmd: cli::StatusCmd) -> Result<()> {
     let cfg = config::load(&cmd.name)?;
-    let store = get_store(&cmd.name)?;
+    let store = store::get_store(&cmd.name)?;
 
     let info = store::file::load_token_info(&cmd.name)?;
 
-    let (expires_at, scope, token_type, store_name) = match &info {
-        Some(i) => (Some(i.expires_at), Some(i.scope.clone()), Some(i.token_type.clone()), Some(i.store.clone())),
-        None => (None, None, None, None),
+    let (expires_at, scope, token_type) = match &info {
+        Some(i) => (Some(i.expires_at), Some(i.scope.clone()), Some(i.token_type.clone())),
+        None => (None, None, None),
     };
 
     let has_token = store.get_access_token(&cmd.name)?.is_some();
@@ -432,7 +385,6 @@ async fn cmd_status(json: bool, cmd: cli::StatusCmd) -> Result<()> {
             valid,
             expires_at,
             scope,
-            store: store_name,
             refreshable,
             introspected,
         });
@@ -452,9 +404,6 @@ async fn cmd_status(json: bool, cmd: cli::StatusCmd) -> Result<()> {
         }
         if let Some(ref t) = token_type {
             println!("  Type:    {t}");
-        }
-        if let Some(ref s) = store_name {
-            println!("  Store:   {s}");
         }
         println!("  Refresh: {}", if refreshable { "yes" } else { "no" });
         if let Some(ref info) = introspected {
@@ -489,7 +438,7 @@ async fn cmd_list(json: bool) -> Result<()> {
 
     let mut entries = Vec::new();
     for name in &names {
-        let store = get_store(name)?;
+        let store = store::get_store(name)?;
         let has_token = store.get_access_token(name)?.is_some();
         let info = store::file::load_token_info(name)?;
         let expired = info.as_ref().map_or(true, |i| chrono::Utc::now().timestamp() > i.expires_at);
@@ -531,7 +480,7 @@ async fn cmd_remove(json: bool, cmd: cli::RemoveCmd) -> Result<()> {
         return Ok(());
     }
 
-    let store = get_store(&cmd.name)?;
+    let store = store::get_store(&cmd.name)?;
     config::remove(&cmd.name)?;
     store.delete_tokens(&cmd.name)?;
     store::file::delete_token_file(&cmd.name)?;
@@ -583,13 +532,6 @@ async fn cmd_config(json: bool) -> Result<()> {
     let provider_count = if providers_exist { config::list()?.len() } else { 0 };
     let token_count = if tokens_exist { std::fs::read_dir(&tokens)?.count() } else { 0 };
 
-    let keyring_available = {
-        #[cfg(feature = "keyring")]
-        { store::keyring_store::probe_keyring() }
-        #[cfg(not(feature = "keyring"))]
-        { false }
-    };
-    let keyring_feature = cfg!(feature = "keyring");
 
     if json {
         let out = output::Envelope::new("config", output::ConfigOutput {
@@ -610,10 +552,6 @@ async fn cmd_config(json: bool) -> Result<()> {
                 providers: provider_count,
                 tokens: token_count,
             },
-            keyring: output::KeyringInfo {
-                feature_enabled: keyring_feature,
-                available: keyring_available,
-            },
         });
         println!("{}", out.to_json()?);
     } else {
@@ -629,15 +567,8 @@ async fn cmd_config(json: bool) -> Result<()> {
         println!("  Providers dir:   {}", if providers_exist { "exists" } else { "not created" });
         println!("  Tokens dir:      {}", if tokens_exist { "exists" } else { "not created" });
         println!("  Discovery cache: {}", if discovery_exist { "exists" } else { "not created" });
-        println!("  Provider count:  {provider_count}");
-        println!("  Token count:     {token_count}");
-        println!();
-        println!("Keyring:");
-        println!("  Feature:         {}", if keyring_feature { "enabled" } else { "disabled" });
-        println!("  Available:       {}", if keyring_available { "yes" } else { "no" });
-        if keyring_feature && !keyring_available {
-            println!("  Note:            OS keyring not accessible; new providers default to file store");
-        }
+        println!("  Provider count:  {}", provider_count);
+        println!("  Token count:     {}", token_count);
     }
 
     Ok(())
@@ -647,7 +578,7 @@ async fn cmd_config(json: bool) -> Result<()> {
 
 async fn cmd_ensure(json: bool, cmd: cli::EnsureCmd) -> Result<()> {
     let cfg = config::load(&cmd.name)?;
-    let store = get_store(&cmd.name)?;
+    let store = store::get_store(&cmd.name)?;
 
     let has_token = store.get_access_token(&cmd.name)?.is_some();
 
