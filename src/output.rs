@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::os::unix::fs::MetadataExt;
 
 /// Output format for token command.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -11,9 +12,57 @@ pub enum TokenFormat {
     Env,
 }
 
+/// Stdout destination type for token safety.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StdoutKind {
+    /// Terminal (TTY) — redact by default
+    Tty,
+    /// File redirect (> file) — redact by default
+    File,
+    /// Pipe to another process ($() or | cmd) — full token
+    Pipe,
+}
+
+/// Detect stdout destination: TTY, file redirect, or pipe.
+pub fn stdout_kind() -> StdoutKind {
+    // First check if it's a TTY using atty
+    if atty::is(atty::Stream::Stdout) {
+        return StdoutKind::Tty;
+    }
+
+    // Not a TTY — check if it's a file or pipe using fstat
+    #[cfg(unix)]
+    {
+        use std::os::unix::io::AsRawFd;
+        let fd = std::io::stdout().as_raw_fd();
+        let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+        if unsafe { libc::fstat(fd, &mut stat) } == 0 {
+            let mode = stat.st_mode;
+            // File type is in the high bits (S_IFMT mask = 0o170000)
+            let file_type = mode & 0o170000;
+            match file_type {
+                0o100000 => StdoutKind::File,  // S_IFREG
+                0o010000 => StdoutKind::Pipe,  // S_IFIFO
+                _ => StdoutKind::File,
+            }
+        } else {
+            StdoutKind::File
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        StdoutKind::File
+    }
+}
+
 /// Whether stdout is a real terminal (not piped/redirected).
 pub fn is_stdout_tty() -> bool {
-    atty::is(atty::Stream::Stdout)
+    stdout_kind() == StdoutKind::Tty
+}
+
+/// Whether stdout is a pipe to another process.
+pub fn is_stdout_pipe() -> bool {
+    stdout_kind() == StdoutKind::Pipe
 }
 
 /// Redact a token for TTY display: keep first 8 and last 4 chars.
@@ -25,13 +74,16 @@ pub fn redact_token(token: &str) -> String {
     format!("{}...{}", &token[..8], &token[token.len()-4..])
 }
 
-/// Format a token for output. When `reveal` is false and stdout is a TTY,
-/// the token is redacted to prevent accidental leaks.
+/// Format a token for output. Token is redacted on TTY and file redirects unless reveal=true.
+/// Only when stdout is a pipe (to another process) is the full token shown.
 pub fn format_token(name: &str, token: &str, format: TokenFormat, reveal: bool) -> String {
-    let display_token = if reveal || !is_stdout_tty() {
+    let display_token = if reveal {
         token.to_string()
     } else {
-        redact_token(token)
+        match stdout_kind() {
+            StdoutKind::Pipe => token.to_string(),  // Full token to pipe
+            StdoutKind::Tty | StdoutKind::File => redact_token(token),  // Redact on TTY and file
+        }
     };
     match format {
         TokenFormat::Raw => display_token,
