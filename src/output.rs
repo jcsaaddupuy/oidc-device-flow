@@ -122,7 +122,6 @@ pub struct TokenAllOutput {
 
 #[derive(Serialize)]
 pub struct TokenAllEntry {
-    pub name: String,
     pub access_token: String,
     pub expires_at: i64,
     pub expired: bool,

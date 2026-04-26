@@ -59,7 +59,7 @@ curl -H "Authorization: Bearer $(odf token entra)" \
 
 ## Token Safety
 
-Tokens are sensitive. `odf` protects against accidental leaks:
+Tokens are sensitive. `odf` protects against _accidental_ leaks:
 
 **TTY-guarded output** — when stdout is a terminal, tokens are redacted:
 
@@ -158,11 +158,7 @@ odf remove myapp --ignore-missing  # succeed silently if not found
 
 ### `odf token --all` — batch all providers
 
-```bash
-# Env format for all providers
-eval "$(odf token --all --format env)"
-# $ODF_TOKEN_github, $ODF_TOKEN_aws, etc.
-```
+
 
 ## Examples
 

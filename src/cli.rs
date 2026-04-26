@@ -117,8 +117,9 @@ pub struct LoginCmd {
 
 #[derive(clap::Args)]
 pub struct TokenCmd {
-    /// Provider name
-    pub name: String,
+    /// Provider name (optional with --all)
+    #[arg(conflicts_with = "all")]
+    pub name: Option<String>,
 
     /// Output format
     #[arg(long, value_enum, default_value = "raw")]

@@ -218,15 +218,19 @@ async fn cmd_token(json: bool, cmd: cli::TokenCmd) -> Result<()> {
         return cmd_token_all(json, &cmd).await;
     }
 
-    let cfg = config::load(&cmd.name)?;
-    let store = store::get_store(&cmd.name)?;
-    let info = store::file::load_token_info(&cmd.name)?;
+    let name = cmd.name.as_ref().ok_or_else(|| {
+        OdfError::Config("Provider name required unless --all is specified".into())
+    })?;
+
+    let cfg = config::load(name)?;
+    let store = store::get_store(name)?;
+    let info = store::file::load_token_info(name)?;
     let expired = info.as_ref().map_or(true, |i| chrono::Utc::now().timestamp() > i.expires_at);
 
     // Auto-refresh if expired and refresh token available
     if expired && !cmd.no_auto_refresh {
-        if store.get_refresh_token(&cmd.name)?.is_some() {
-            let result = oidc::refresh::refresh_token(&cmd.name, &cfg, store.as_ref()).await?;
+        if store.get_refresh_token(name)?.is_some() {
+            let result = oidc::refresh::refresh_token(name, &cfg, store.as_ref()).await?;
             if json {
                 let out = output::Envelope::new("token", output::TokenOutput {
                     access_token: result.access_token,
@@ -237,7 +241,7 @@ async fn cmd_token(json: bool, cmd: cli::TokenCmd) -> Result<()> {
                 });
                 println!("{}", out.to_json()?);
             } else {
-                let formatted = output::format_token(&cmd.name, &result.access_token, cmd.format(), cmd.reveal);
+                let formatted = output::format_token(name, &result.access_token, cmd.format(), cmd.reveal);
                 print!("{formatted}");
             }
             return Ok(());
@@ -247,7 +251,7 @@ async fn cmd_token(json: bool, cmd: cli::TokenCmd) -> Result<()> {
     }
 
     let token = store
-        .get_access_token(&cmd.name)?
+        .get_access_token(name)?
         .ok_or_else(|| OdfError::Auth("No token found. Run 'odf login' first.".into()))?;
 
     if json {
@@ -262,7 +266,7 @@ async fn cmd_token(json: bool, cmd: cli::TokenCmd) -> Result<()> {
         });
         println!("{}", out.to_json()?);
     } else {
-        let formatted = output::format_token(&cmd.name, &token, cmd.format(), cmd.reveal);
+        let formatted = output::format_token(name, &token, cmd.format(), cmd.reveal);
         print!("{formatted}");
     }
 
@@ -271,16 +275,19 @@ async fn cmd_token(json: bool, cmd: cli::TokenCmd) -> Result<()> {
 
 /// `odf token --check` — exit-code only, no output
 async fn cmd_token_check(cmd: &cli::TokenCmd) -> Result<()> {
-    let store = store::get_store(&cmd.name)?;
-    if store.get_access_token(&cmd.name)?.is_none() {
+    let name = cmd.name.as_ref().ok_or_else(|| {
+        OdfError::Config("Provider name required".into())
+    })?;
+    let store = store::get_store(name)?;
+    if store.get_access_token(name)?.is_none() {
         return Err(OdfError::Auth("No token".into()));
     }
-    let info = store::file::load_token_info(&cmd.name)?;
+    let info = store::file::load_token_info(name)?;
     let expired = info.as_ref().map_or(true, |i| chrono::Utc::now().timestamp() > i.expires_at);
     if expired {
-        if !cmd.no_auto_refresh && store.get_refresh_token(&cmd.name)?.is_some() {
-            let cfg = config::load(&cmd.name)?;
-            let _ = oidc::refresh::refresh_token(&cmd.name, &cfg, store.as_ref()).await?;
+        if !cmd.no_auto_refresh && store.get_refresh_token(name)?.is_some() {
+            let cfg = config::load(name)?;
+            let _ = oidc::refresh::refresh_token(name, &cfg, store.as_ref()).await?;
             return Ok(());
         }
         return Err(OdfError::ExpiredNoRefresh);
@@ -311,7 +318,6 @@ async fn cmd_token_all(json: bool, cmd: &cli::TokenCmd) -> Result<()> {
             let expired = info.as_ref().map_or(true, |i| chrono::Utc::now().timestamp() > i.expires_at);
             if json {
                 entries.push(output::TokenAllEntry {
-                    name: name.clone(),
                     access_token: token,
                     expires_at,
                     expired,
