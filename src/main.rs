@@ -7,8 +7,25 @@ mod store;
 
 use error::{OdfError, Result};
 
+/// Set up panic hook to silently exit on broken pipe errors.
+/// This happens when piping output to a command that exits early.
+fn setup_panic_hook() {
+    std::panic::set_hook(Box::new(|panic_info| {
+        // Check if this is a broken pipe error
+        if let Some(msg) = panic_info.payload().downcast_ref::<&str>() {
+            if msg.contains("Broken pipe") || msg.contains("failed printing to stdout") {
+                std::process::exit(0);
+            }
+        }
+        // For other panics, use default behavior
+        eprintln!("{}", panic_info);
+        std::process::exit(101);
+    }));
+}
+
 #[tokio::main]
 async fn main() {
+    setup_panic_hook();
     let cli = cli::parse();
     let json = cli.output.is_json();
 

@@ -22,6 +22,25 @@ odf login github
 curl -H "Authorization: Bearer $(odf token github)" https://api.github.com/user
 ```
 
+### Microsoft Entra ID (Azure AD)
+
+```bash
+# Register Entra ID provider
+# Replace <tenant-id>, <client-id> with your values
+odf add entra \
+  --issuer-url https://login.microsoftonline.com/<tenant-id>/v2.0 \
+  --client-id <client-id> \
+  --scopes "openid,profile,User.Read"
+
+# Authenticate
+odf login entra
+
+# Use the token with Microsoft Graph API
+curl -H "Authorization: Bearer $(odf token entra)" \
+  https://graph.microsoft.com/v1.0/me
+```
+
+
 ## Commands
 
 | Command | Description |
@@ -154,7 +173,6 @@ eval "$(odf token --all --format env)"
 # Replace <tenant-id>, <client-id> with your values
 odf add entra \
   --issuer-url https://login.microsoftonline.com/<tenant-id>/v2.0 \
-  --device-auth-endpoint https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/devicecode \
   --client-id <client-id> \
   --scopes "openid,profile,User.Read"
 
@@ -179,15 +197,6 @@ odf login searxng
 
 curl -s "https://searxng.example.com/search?q=hello&format=json" \
   -H "Authorization: Bearer $(odf token searxng)" --insecure | jq '.results[].title'
-```
-
-### Multiple providers
-
-```bash
-odf add github-read --issuer-url https://github.com --client-id Iv1.abc --scopes read
-odf add github-write --issuer-url https://github.com --client-id Iv1.abc --scopes write,repo
-
-odf token github-read  # different scope, different token
 ```
 
 ### Token output formats
