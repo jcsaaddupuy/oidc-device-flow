@@ -1,5 +1,6 @@
 mod cli;
 mod config;
+mod encryption;
 mod error;
 mod oidc;
 mod output;
