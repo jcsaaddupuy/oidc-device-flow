@@ -1,6 +1,7 @@
 # odf — OIDC Device Flow CLI
 
 Manage OIDC tokens for any CLI tool using the device authorization grant.
+Designed for automation and AI-assistant workflows.
 
 ## Install
 
@@ -28,11 +29,121 @@ curl -H "Authorization: Bearer $(odf token github)" https://api.github.com/user
 | `odf add <name> [options]` | Register a new OIDC provider |
 | `odf login <name>` | Authenticate via device flow |
 | `odf token <name>` | Print access token (auto-refreshes if expired) |
+| `odf ensure <name>` | Get a valid token: check → refresh → print |
 | `odf refresh <name>` | Force refresh the token |
 | `odf status <name>` | Show token health, expiry, scopes |
 | `odf list` | List all providers and token status |
 | `odf remove <name>` | Remove provider and its tokens |
+| `odf config` | Show configuration paths, keyring status |
 | `odf config export [name]` | Export provider config as TOML (no secrets) |
+| `odf discover <name>` | Force-refresh OIDC discovery cache |
+
+## Token Safety
+
+Tokens are sensitive. `odf` protects against accidental leaks:
+
+**TTY-guarded output** — when stdout is a terminal, tokens are redacted:
+
+```
+$ odf token myapp
+eyJhbGci...nrng
+```
+
+When captured or piped, the full token flows so commands work transparently:
+
+```bash
+curl -H "Authorization: Bearer $(odf token myapp)" https://api.example.com/me  # full token
+odf token myapp | wc -c   # full token
+odf token myapp > /tmp/t  # full token
+```
+
+Use `--reveal` to show the full token on a terminal:
+
+```
+$ odf token myapp --reveal
+eyJhbGciOiJSUzI1NiIsImtpZCI6IjA2NWJkYzE2...
+```
+
+**No token in non-token commands** — `odf status`, `odf list`, `odf refresh`, and `odf config` never include the access token value, even in JSON mode.
+
+**JSON mode always includes the full token** (it's for programmatic consumers) but marks it with `"sensitive": true`:
+
+```json
+{"type":"token","version":1,"access_token":"eyJ...","sensitive":true}
+```
+
+## AI-Friendly Features
+
+### Global `--output` flag
+
+All commands support `--output json` for structured, machine-parseable output:
+
+```bash
+odf --output json list
+odf --output json status myapp
+odf --output json ensure myapp
+```
+
+Every JSON response is wrapped in an envelope with `type` and `version`:
+
+```json
+{"type":"status","version":1,"name":"myapp","valid":true,...}
+```
+
+### JSON errors on stderr
+
+When `--output json` is active, errors go to stderr as structured JSON:
+
+```json
+{"type":"error","version":1,"error":"AuthError","message":"No token found","exit_code":2}
+```
+
+### `odf ensure` — one command for automation
+
+Check if a token is valid, refresh if expired, print it. Exit 2 if no token.
+
+```bash
+# In a script:
+TOKEN=$(odf ensure myapp) || { echo "Login required"; exit 1; }
+curl -H "Authorization: Bearer $TOKEN" https://api.example.com/me
+```
+
+### `odf token --check` — exit-code-only validity
+
+No output. Just the exit code. Perfect for shell conditionals:
+
+```bash
+if odf token myapp --check; then
+  echo "Token is valid"
+else
+  echo "Token expired or missing"
+fi
+```
+
+### `odf login --print-url` — CI-friendly
+
+Prints the verification URL to stdout. When the token is granted, prints the token too — one round-trip for automation:
+
+```bash
+URL=$(odf login myapp --print-url)
+# ...user authorizes...
+# token appears on stdout after polling completes
+```
+
+### Idempotent operations
+
+```bash
+odf add myapp --update --client-id abc --issuer-url https://...  # no error if exists
+odf remove myapp --ignore-missing  # succeed silently if not found
+```
+
+### `odf token --all` — batch all providers
+
+```bash
+# Env format for all providers
+eval "$(odf token --all --format env)"
+# $ODF_TOKEN_github, $ODF_TOKEN_aws, etc.
+```
 
 ## Examples
 
@@ -46,6 +157,7 @@ odf add searxng \
   --insecure
 
 odf login searxng
+
 curl -s "https://searxng.example.com/search?q=hello&format=json" \
   -H "Authorization: Bearer $(odf token searxng)" --insecure | jq '.results[].title'
 ```
@@ -55,19 +167,8 @@ curl -s "https://searxng.example.com/search?q=hello&format=json" \
 ```bash
 odf add github-read --issuer-url https://github.com --client-id Iv1.abc --scopes read
 odf add github-write --issuer-url https://github.com --client-id Iv1.abc --scopes write,repo
-odf token github-read   # different scope, different token
-```
 
-### CI / Automation
-
-```bash
-# Print URL for out-of-band authorization (no TTY needed)
-URL=$(odf login myapp --print-url)
-echo "Authorize at: $URL" | slack-notify
-
-# Structured JSON output
-odf login myapp --print-url --json
-# {"url":"https://...","user_code":"ABCD-1234","interval":5}
+odf token github-read  # different scope, different token
 ```
 
 ### Token output formats
@@ -77,8 +178,7 @@ odf login myapp --print-url --json
 curl -H "Authorization: Bearer $(odf token myapp)" https://api.example.com/me
 
 # Header format
-eval "$(odf token myapp --format header)"
-# prints: Bearer eyJ...
+eval "$(odf token myapp --format header)"  # prints: Bearer eyJ...
 
 # Env format — load multiple providers
 eval "$(odf token github --format env)"
@@ -98,8 +198,7 @@ odf add legacy \
 
 ### Token storage
 
-By default, `odf` uses the OS keychain (macOS Keychain, Windows Credential Manager, Linux secret-service).
-Falls back to file-based storage if keyring is unavailable.
+By default, `odf` uses the OS keychain (macOS Keychain, Windows Credential Manager, Linux secret-service). Falls back to file-based storage if keyring is unavailable.
 
 ```bash
 # Force file-based storage
