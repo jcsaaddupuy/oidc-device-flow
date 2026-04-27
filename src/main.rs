@@ -140,7 +140,7 @@ async fn cmd_login(json: bool, cmd: cli::LoginCmd) -> Result<()> {
 
     // Step 1: Request device code
     let (device_code, user_code, verification_uri, verification_uri_complete, interval) =
-        oidc::device::request_device_code(&cfg, cfg.insecure).await?;
+        oidc::device::request_device_code(&cmd.name, &cfg, cfg.insecure).await?;
 
     let display_url = verification_uri_complete.unwrap_or_else(|| verification_uri.clone());
 
@@ -167,7 +167,7 @@ async fn cmd_login(json: bool, cmd: cli::LoginCmd) -> Result<()> {
     }
 
     // Step 2: Poll for token
-    let result = oidc::device::poll_for_token(&cfg, &device_code, interval, cfg.insecure).await?;
+    let result = oidc::device::poll_for_token(&cmd.name, &cfg, &device_code, interval, cfg.insecure).await?;
 
     // Step 3: Save tokens
     let store = store::get_store(&cmd.name)?;
@@ -248,7 +248,7 @@ async fn cmd_token(json: bool, cmd: cli::TokenCmd) -> Result<()> {
             }
             return Ok(());
         } else if info.is_some() {
-            return Err(OdfError::ExpiredNoRefresh);
+            return Err(OdfError::ExpiredNoRefresh(name.clone()));
         }
     }
 
@@ -292,7 +292,7 @@ async fn cmd_token_check(cmd: &cli::TokenCmd) -> Result<()> {
             let _ = oidc::refresh::refresh_token(name, &cfg, store.as_ref()).await?;
             return Ok(());
         }
-        return Err(OdfError::ExpiredNoRefresh);
+        return Err(OdfError::ExpiredNoRefresh(name.clone()));
     }
     Ok(())
 }
@@ -386,7 +386,7 @@ async fn cmd_status(json: bool, cmd: cli::StatusCmd) -> Result<()> {
 
     let introspected = if cmd.verify && has_token {
         let token = store.get_access_token(&cmd.name)?.unwrap();
-        match oidc::introspect::introspect(&cfg, &token).await? {
+        match oidc::introspect::introspect(&cmd.name, &cfg, &token).await? {
             Some(info) => Some(output::IntrospectInfo {
                 active: info.active,
                 scope: info.scope,
@@ -656,7 +656,7 @@ async fn cmd_ensure(json: bool, cmd: cli::EnsureCmd) -> Result<()> {
             return Ok(());
         }
 
-        return Err(OdfError::ExpiredNoRefresh);
+        return Err(OdfError::ExpiredNoRefresh(cmd.name.clone()));
     }
 
     // No token at all

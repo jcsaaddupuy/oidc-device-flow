@@ -29,10 +29,11 @@ pub struct IntrospectResult {
 /// Introspect a token against the provider's introspection endpoint.
 /// Returns None if the provider doesn't advertise an introspection endpoint.
 pub async fn introspect(
+    name: &str,
     config: &ProviderConfig,
     access_token: &str,
 ) -> Result<Option<IntrospectResult>> {
-    let endpoint = match resolve_introspection_endpoint(config).await? {
+    let endpoint = match resolve_introspection_endpoint(name, config).await? {
         Some(ep) => ep,
         None => return Ok(None),
     };
@@ -60,17 +61,17 @@ pub async fn introspect(
     }))
 }
 
-async fn resolve_introspection_endpoint(config: &ProviderConfig) -> Result<Option<String>> {
+async fn resolve_introspection_endpoint(name: &str, config: &ProviderConfig) -> Result<Option<String>> {
     if config.token_endpoint.is_some() {
         // If no explicit introspection endpoint, try discovery
         if let Some(ref issuer) = config.issuer_url {
-            let doc = discovery::discover("__resolve__", issuer, config.insecure).await?;
+            let doc = discovery::discover(name, issuer, config.insecure).await?;
             Ok(doc.introspection_endpoint)
         } else {
             Ok(None)
         }
     } else if let Some(ref issuer) = config.issuer_url {
-        let doc = discovery::discover("__resolve__", issuer, config.insecure).await?;
+        let doc = discovery::discover(name, issuer, config.insecure).await?;
         Ok(doc.introspection_endpoint)
     } else {
         Ok(None)

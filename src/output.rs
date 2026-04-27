@@ -285,7 +285,7 @@ impl ErrorOutput {
 
     pub fn from_odf_error(err: &crate::error::OdfError) -> Self {
         let error_type = match err {
-            crate::error::OdfError::Auth(_) | crate::error::OdfError::ExpiredNoRefresh => "AuthError",
+            crate::error::OdfError::Auth(_) | crate::error::OdfError::ExpiredNoRefresh(_) => "AuthError",
             crate::error::OdfError::DeviceFlow(_) => "DeviceFlowError",
             crate::error::OdfError::Network(_) | crate::error::OdfError::Http(_) | crate::error::OdfError::Discovery(_) => "NetworkError",
             crate::error::OdfError::NotFound(_) => "NotFoundError",

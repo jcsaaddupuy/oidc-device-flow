@@ -21,8 +21,8 @@ pub enum OdfError {
     #[error("Name already exists: {0}")]
     NameConflict(String),
 
-    #[error("Token expired and no refresh token available")]
-    ExpiredNoRefresh,
+    #[error("Token expired and no refresh token available. Re-authenticate with 'odf login {0}' or add 'offline_access' scope for refresh tokens")]
+    ExpiredNoRefresh(String),
 
     #[error("OIDC discovery error: {0}")]
     Discovery(String),
@@ -51,7 +51,7 @@ impl OdfError {
     /// 0 = success, 1 = generic, 2 = auth, 3 = network
     pub fn exit_code(&self) -> i32 {
         match self {
-            OdfError::Auth(_) | OdfError::ExpiredNoRefresh | OdfError::DeviceFlow(_) => 2,
+            OdfError::Auth(_) | OdfError::ExpiredNoRefresh(_) | OdfError::DeviceFlow(_) => 2,
             OdfError::Network(_) | OdfError::Http(_) | OdfError::Discovery(_) => 3,
             _ => 1,
         }

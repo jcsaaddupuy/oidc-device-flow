@@ -25,7 +25,7 @@ pub async fn refresh_token(
         .get_refresh_token(name)?
         .ok_or_else(|| OdfError::Auth("No refresh token available".into()))?;
 
-    let endpoint = resolve_token_endpoint(config).await?;
+    let endpoint = resolve_token_endpoint(name, config).await?;
 
     let client = build_client(config.insecure)?;
     let params = [
@@ -60,7 +60,7 @@ pub async fn refresh_token(
 // Re-use LoginResult from device module
 pub use crate::oidc::device::LoginResult;
 
-async fn resolve_token_endpoint(config: &ProviderConfig) -> Result<String> {
+async fn resolve_token_endpoint(name: &str, config: &ProviderConfig) -> Result<String> {
     if let Some(ref ep) = config.token_endpoint {
         return Ok(ep.clone());
     }
@@ -68,7 +68,7 @@ async fn resolve_token_endpoint(config: &ProviderConfig) -> Result<String> {
         .issuer_url
         .as_ref()
         .ok_or_else(|| OdfError::Config("Neither issuer_url nor token_endpoint set".into()))?;
-    let doc = discovery::discover("__resolve__", issuer, config.insecure).await?;
+    let doc = discovery::discover(name, issuer, config.insecure).await?;
     Ok(doc.token_endpoint)
 }
 

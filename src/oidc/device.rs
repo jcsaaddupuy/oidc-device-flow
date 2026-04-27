@@ -52,10 +52,11 @@ pub struct LoginResult {
 
 /// Initiate device flow: request device code, return verification info.
 pub async fn request_device_code(
+    name: &str,
     config: &ProviderConfig,
     insecure: bool,
 ) -> Result<(String, String, String, Option<String>, u64)> {
-    let endpoint = resolve_device_auth_endpoint(config, insecure).await?;
+    let endpoint = resolve_device_auth_endpoint(name, config, insecure).await?;
 
     let client = build_client(insecure)?;
     let params = vec![
@@ -87,12 +88,13 @@ pub async fn request_device_code(
 /// Poll the token endpoint until the user authorizes or an error occurs.
 /// Displays a spinner on TTY, silent otherwise.
 pub async fn poll_for_token(
+    name: &str,
     config: &ProviderConfig,
     device_code: &str,
     interval: u64,
     insecure: bool,
 ) -> Result<LoginResult> {
-    let endpoint = resolve_token_endpoint(config, insecure).await?;
+    let endpoint = resolve_token_endpoint(name, config, insecure).await?;
     let client = build_client(insecure)?;
 
     let spinner = if atty::is(atty::Stream::Stderr) {
@@ -190,7 +192,7 @@ pub fn save_login_result(name: &str, _store: &dyn TokenStore, result: &LoginResu
 }
 
 /// Resolve the device authorization endpoint from config or discovery.
-async fn resolve_device_auth_endpoint(config: &ProviderConfig, insecure: bool) -> Result<String> {
+async fn resolve_device_auth_endpoint(name: &str, config: &ProviderConfig, insecure: bool) -> Result<String> {
     if let Some(ref ep) = config.device_auth_endpoint {
         return Ok(ep.clone());
     }
@@ -198,12 +200,12 @@ async fn resolve_device_auth_endpoint(config: &ProviderConfig, insecure: bool) -
         .issuer_url
         .as_ref()
         .ok_or_else(|| OdfError::Config("Neither issuer_url nor device_auth_endpoint set".into()))?;
-    let doc = discovery::discover("__resolve__", issuer, insecure).await?;
+    let doc = discovery::discover(name, issuer, insecure).await?;
     Ok(doc.device_authorization_endpoint)
 }
 
 /// Resolve the token endpoint from config or discovery.
-async fn resolve_token_endpoint(config: &ProviderConfig, insecure: bool) -> Result<String> {
+async fn resolve_token_endpoint(name: &str, config: &ProviderConfig, insecure: bool) -> Result<String> {
     if let Some(ref ep) = config.token_endpoint {
         return Ok(ep.clone());
     }
@@ -211,7 +213,7 @@ async fn resolve_token_endpoint(config: &ProviderConfig, insecure: bool) -> Resu
         .issuer_url
         .as_ref()
         .ok_or_else(|| OdfError::Config("Neither issuer_url nor token_endpoint set".into()))?;
-    let doc = discovery::discover("__resolve__", issuer, insecure).await?;
+    let doc = discovery::discover(name, issuer, insecure).await?;
     Ok(doc.token_endpoint)
 }
 

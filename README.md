@@ -12,15 +12,17 @@ cargo install --git https://github.com/autonomous-toaster/oidc-device-flow
 ## Quick Start
 
 ```bash
-# Register a provider
-odf add github --issuer-url https://github.com --client-id Iv1.abc123 --scopes openid,profile,email
+# Register a provider (include offline_access for refresh tokens)
+odf add github --issuer-url https://github.com --client-id Iv1.abc123 --scopes openid,profile,email,offline_access
 
 # Authenticate (opens browser)
 odf login github
 
 # Use the token
-curl -H "Authorization: Bearer $(odf token github)" https://api.github.com/user
+odf token github
 ```
+
+**Important:** Include `offline_access` in your scopes to receive refresh tokens. Without it, tokens cannot be auto-refreshed when they expire. See [Token Refresh](#token-refresh) for details.
 
 ### Microsoft Entra ID (Azure AD)
 
@@ -30,7 +32,7 @@ curl -H "Authorization: Bearer $(odf token github)" https://api.github.com/user
 odf add entra \
   --issuer-url https://login.microsoftonline.com/<tenant-id>/v2.0 \
   --client-id <client-id> \
-  --scopes "openid,profile,User.Read"
+  --scopes "openid,profile,User.Read,offline_access"
 
 # Authenticate
 odf login entra
@@ -250,7 +252,7 @@ curl -H "Authorization: Bearer $(odf token entra)" \
 odf add searxng \
   --issuer-url https://dex.example.com \
   --client-id searxng \
-  --scopes openid,profile,email,groups \
+  --scopes openid,profile,email,groups,offline_access \
   --insecure
 
 odf login searxng
@@ -299,6 +301,54 @@ odf status myapp --verify
 | 1 | Generic error |
 | 2 | Auth error (expired token, no refresh token) |
 | 3 | Network error |
+
+## Token Refresh
+
+### Automatic Refresh
+
+When a token expires, `odf` attempts to automatically refresh it using the stored refresh token:
+
+```bash
+# This will auto-refresh if expired
+odf token myapp
+```
+
+### Refresh Tokens Require `offline_access`
+
+Most OIDC providers **do not return refresh tokens** by default with the device flow. You must include the `offline_access` scope:
+
+```bash
+# ✗ Wrong - no refresh token, cannot auto-refresh
+odf add myapp --scopes openid,profile,email
+
+# ✓ Correct - includes refresh token
+odf add myapp --scopes openid,profile,email,offline_access
+```
+
+### What Happens Without a Refresh Token?
+
+When a token expires without a refresh token:
+
+```
+$ odf token myapp
+Error: Token expired and no refresh token available. Re-authenticate with 'odf login myapp' or add 'offline_access' scope for refresh tokens
+```
+
+The error message provides two options:
+1. Re-authenticate with `odf login myapp`
+2. Re-add the provider with `--scopes "...offline_access"` to enable refresh tokens
+
+### Provider Support
+
+| Provider | Refresh Token Support |
+|----------|----------------------|
+| Microsoft Entra ID | Yes (requires `offline_access`) |
+| GitHub | No (PAT-based, no refresh) |
+| Dex | Yes (requires `offline_access`) |
+| Keycloak | Yes (requires `offline_access`) |
+| Okta | Yes (requires `offline_access`) |
+
+For providers without refresh token support, you'll need to re-authenticate when tokens expire.
 
 ## Configuration
 
