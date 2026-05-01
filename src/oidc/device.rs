@@ -3,6 +3,7 @@ use crate::error::{OdfError, Result};
 use crate::oidc::discovery;
 use crate::store::file::{self, TokenData};
 use crate::store::TokenStore;
+use crate::term::{detect_term_mode, style};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::Deserialize;
 
@@ -59,10 +60,15 @@ pub async fn request_device_code(
     let endpoint = resolve_device_auth_endpoint(name, config, insecure).await?;
 
     let client = build_client(insecure)?;
-    let params = vec![
+    let mut params = vec![
         ("client_id", config.client_id.clone()),
         ("scope", config.scope_string()),
     ];
+    
+    // Include redirect_uri if configured (required by some providers)
+    if let Some(ref redirect_uri) = config.redirect_uri {
+        params.push(("redirect_uri", redirect_uri.clone()));
+    }
 
     let resp = client.post(&endpoint).form(&params).send().await?;
     if !resp.status().is_success() {
@@ -86,7 +92,7 @@ pub async fn request_device_code(
 }
 
 /// Poll the token endpoint until the user authorizes or an error occurs.
-/// Displays a spinner on TTY, silent otherwise.
+/// Displays a spinner in interactive mode with elapsed time.
 pub async fn poll_for_token(
     name: &str,
     config: &ProviderConfig,
@@ -97,30 +103,42 @@ pub async fn poll_for_token(
     let endpoint = resolve_token_endpoint(name, config, insecure).await?;
     let client = build_client(insecure)?;
 
-    let spinner = if atty::is(atty::Stream::Stderr) {
+    let term_mode = detect_term_mode();
+    let spinner = if term_mode.supports_animation() {
         let pb = ProgressBar::new_spinner();
         pb.set_style(
-            ProgressStyle::with_template("{spinner} {msg}")
+            ProgressStyle::with_template("{spinner:.cyan} {msg}")
                 .unwrap()
                 .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
         );
+        pb.enable_steady_tick(std::time::Duration::from_millis(100));
         pb.set_message("Waiting for authorization...");
         Some(pb)
+    } else if term_mode.supports_color() {
+        // CI mode: just print a static message
+        eprintln!("  {} Waiting for authorization...", style::dim("•"));
+        None
     } else {
+        // Non-interactive: silent
         None
     };
 
-    let mut interval = interval;
-    let mut current_interval = interval;
+    let mut poll_interval = interval;
+    let start = std::time::Instant::now();
 
     loop {
-        tokio::time::sleep(std::time::Duration::from_secs(current_interval)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(poll_interval)).await;
 
-        let params = [
+        let mut params = vec![
             ("grant_type", "urn:ietf:params:oauth:grant-type:device_code".to_string()),
             ("device_code", device_code.to_string()),
             ("client_id", config.client_id.clone()),
         ];
+        
+        // Include redirect_uri if configured (required by some providers)
+        if let Some(ref redirect_uri) = config.redirect_uri {
+            params.push(("redirect_uri", redirect_uri.clone()));
+        }
 
         let resp = client.post(&endpoint).form(&params).send().await?;
         let body = resp.text().await?;
@@ -128,7 +146,14 @@ pub async fn poll_for_token(
         // Try to parse as success
         if let Ok(token) = serde_json::from_str::<TokenResponse>(&body) {
             if let Some(spinner) = &spinner {
-                spinner.finish_with_message("✓ Authorized");
+                let elapsed = start.elapsed();
+                let msg = format!("Authorized in {}{}", 
+                    format_elapsed(elapsed),
+                    style::dim(" ✓").as_str()
+                );
+                spinner.finish_with_message(msg);
+            } else if term_mode.supports_color() {
+                eprintln!("  {} Authorized", style::success("✓"));
             }
             return Ok(LoginResult {
                 access_token: token.access_token,
@@ -144,22 +169,29 @@ pub async fn poll_for_token(
             match err.error.as_str() {
                 "authorization_pending" => {
                     if let Some(spinner) = &spinner {
-                        spinner.tick();
+                        let elapsed = start.elapsed();
+                        spinner.set_message(format!("Waiting for authorization... ({})", format_elapsed(elapsed)));
                     }
-                    current_interval = interval;
+                    poll_interval = interval;
                     continue;
                 }
                 "slow_down" => {
-                    interval += 5;
-                    current_interval = interval;
+                    poll_interval = interval + 5;
                     if let Some(spinner) = &spinner {
-                        spinner.tick();
+                        let elapsed = start.elapsed();
+                        spinner.set_message(format!("Waiting for authorization... (slowing down, {})", format_elapsed(elapsed)));
                     }
                     continue;
                 }
                 _ => {
                     if let Some(spinner) = &spinner {
-                        spinner.finish_with_message("✗ Authorization failed");
+                        spinner.finish_with_message(format!("{} Authorization failed", style::error("✗")));
+                    } else if term_mode.supports_color() {
+                        eprintln!("  {} Authorization failed: {} {}", 
+                            style::error("✗"),
+                            err.error,
+                            err.error_description.as_deref().unwrap_or("")
+                        );
                     }
                     return Err(OdfError::DeviceFlow(format!(
                         "{}: {}",
@@ -172,6 +204,16 @@ pub async fn poll_for_token(
 
         // Unknown response
         return Err(OdfError::DeviceFlow(format!("Unexpected token response: {body}")));
+    }
+}
+
+/// Format elapsed time in a human-readable way.
+fn format_elapsed(duration: std::time::Duration) -> String {
+    let secs = duration.as_secs();
+    if secs < 60 {
+        format!("{}s", secs)
+    } else {
+        format!("{}m {}s", secs / 60, secs % 60)
     }
 }
 

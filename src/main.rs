@@ -5,8 +5,10 @@ mod error;
 mod oidc;
 mod output;
 mod store;
+mod term;
 
 use error::{OdfError, Result};
+use term::style;
 
 /// Set up panic hook to silently exit on broken pipe errors.
 /// This happens when piping output to a command that exits early.
@@ -27,6 +29,7 @@ fn setup_panic_hook() {
 #[tokio::main]
 async fn main() {
     setup_panic_hook();
+    term::init_colors();
     let cli = cli::parse();
     let json = cli.output.is_json();
 
@@ -34,6 +37,7 @@ async fn main() {
         cli::Command::Add(cmd) => cmd_add(json, cmd).await,
         cli::Command::Login(cmd) => cmd_login(json, cmd).await,
         cli::Command::Token(cmd) => cmd_token(json, cmd).await,
+        cli::Command::RefreshToken(cmd) => cmd_refresh_token(json, cmd).await,
         cli::Command::Refresh(cmd) => cmd_refresh(json, cmd).await,
         cli::Command::Status(cmd) => cmd_status(json, cmd).await,
         cli::Command::List(_) => cmd_list(json).await,
@@ -74,9 +78,11 @@ async fn cmd_add(json: bool, cmd: cli::AddCmd) -> Result<()> {
 
     let cfg = config::ProviderConfig {
         client_id: cmd.client_id.clone(),
+        client_secret: cmd.client_secret.clone(),
         issuer_url: cmd.issuer_url.clone(),
         device_auth_endpoint: cmd.device_auth_endpoint,
         token_endpoint: cmd.token_endpoint,
+        redirect_uri: cmd.redirect_uri,
         scopes: cmd.scopes,
         audience: cmd.audience,
         extra_params: cmd.extra_params,
@@ -121,7 +127,15 @@ async fn cmd_login(json: bool, cmd: cli::LoginCmd) -> Result<()> {
                     });
                     println!("{}", out.to_json()?);
                 } else {
-                    eprintln!("  Already logged in. Use --force to re-authenticate.");
+                    let term_mode = term::detect_term_mode();
+                    if term_mode.supports_color() {
+                        eprintln!("  {} Already logged in. Use {}.", 
+                            style::warning("!"), 
+                            style::dim("--force to re-authenticate")
+                        );
+                    } else {
+                        eprintln!("  Already logged in. Use --force to re-authenticate.");
+                    }
                 }
                 return Ok(());
             }
@@ -157,11 +171,21 @@ async fn cmd_login(json: bool, cmd: cli::LoginCmd) -> Result<()> {
             println!("{display_url}");
         }
     } else {
-        eprintln!("  Verify at: {display_url}");
-        eprintln!("  User code: {user_code}");
+        let term_mode = term::detect_term_mode();
+        if term_mode.supports_color() {
+            eprintln!("  {}: {}", style::label("Verify at"), style::url(&display_url));
+            eprintln!("  {}: {}", style::label("User code"), style::user_code(&user_code));
+        } else {
+            eprintln!("  Verify at: {display_url}");
+            eprintln!("  User code: {user_code}");
+        }
         if !cmd.no_browser {
             if let Err(e) = open::that(&display_url) {
-                eprintln!("  Could not open browser: {e}");
+                if term_mode.supports_color() {
+                    eprintln!("  {} Could not open browser: {e}", style::warning("!"));
+                } else {
+                    eprintln!("  Could not open browser: {e}");
+                }
             }
         }
     }
@@ -201,7 +225,12 @@ async fn cmd_login(json: bool, cmd: cli::LoginCmd) -> Result<()> {
         });
         println!("{}", out.to_json()?);
     } else {
-        eprintln!("  Token saved.");
+        let term_mode = term::detect_term_mode();
+        if term_mode.supports_color() {
+            eprintln!("  {} Token saved.", style::success("✓"));
+        } else {
+            eprintln!("  Token saved.");
+        }
     }
 
     Ok(())
@@ -358,9 +387,41 @@ async fn cmd_refresh(json: bool, cmd: cli::RefreshCmd) -> Result<()> {
         });
         println!("{}", out.to_json()?);
     } else {
-        eprintln!("  Token refreshed. Expires at {}", chrono::DateTime::from_timestamp(expires_at, 0)
+        let term_mode = term::detect_term_mode();
+        let time_str = chrono::DateTime::from_timestamp(expires_at, 0)
             .map(|t| t.format("%Y-%m-%d %H:%M:%S UTC").to_string())
-            .unwrap_or_else(|| expires_at.to_string()));
+            .unwrap_or_else(|| expires_at.to_string());
+        if term_mode.supports_color() {
+            eprintln!("  {} Token refreshed. Expires at {}", style::success("✓"), style::dim(&time_str));
+        } else {
+            eprintln!("  Token refreshed. Expires at {}", time_str);
+        }
+    }
+
+    Ok(())
+}
+
+// ─── odf refresh-token ───────────────────────────────────────────────────
+
+async fn cmd_refresh_token(json: bool, cmd: cli::RefreshTokenCmd) -> Result<()> {
+    let _cfg = config::load(&cmd.name)?;
+    
+    let refresh_token = store::file::get_refresh_token(&cmd.name)?
+        .ok_or_else(|| OdfError::Auth(format!(
+            "No refresh token for '{}'. Run 'odf login {}' first.",
+            cmd.name, cmd.name
+        )))?;
+
+    if json {
+        let out = output::Envelope::new("refresh_token", output::RefreshTokenOutput {
+            refresh_token: refresh_token.clone(),
+            sensitive: true,
+        });
+        println!("{}", out.to_json()?);
+    } else {
+        // Apply same redaction logic as access token
+        let formatted = output::format_token(&cmd.name, &refresh_token, output::TokenFormat::Raw, cmd.reveal);
+        print!("{formatted}");
     }
 
     Ok(())

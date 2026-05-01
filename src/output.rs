@@ -1,5 +1,4 @@
 use serde::Serialize;
-use std::os::unix::fs::MetadataExt;
 
 /// Output format for token command.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -61,6 +60,7 @@ pub fn is_stdout_tty() -> bool {
 }
 
 /// Whether stdout is a pipe to another process.
+#[allow(dead_code)]
 pub fn is_stdout_pipe() -> bool {
     stdout_kind() == StdoutKind::Pipe
 }
@@ -184,6 +184,13 @@ pub struct TokenAllEntry {
 pub struct RefreshOutput {
     pub expires_at: i64,
     pub scope: String,
+}
+
+/// `odf refresh-token` — contains refresh token (sensitive)
+#[derive(Serialize)]
+pub struct RefreshTokenOutput {
+    pub refresh_token: String,
+    pub sensitive: bool,
 }
 
 /// `odf status` — no secrets
@@ -355,15 +362,15 @@ mod tests {
 
     #[test]
     fn test_format_token_reveal_vs_redact() {
-        // With reveal=true, always full token regardless of TTY
+        // With reveal=true, always full token regardless of stdout type
         assert_eq!(format_token("test", "abcdefghijklmnop", TokenFormat::Raw, true),
                    "abcdefghijklmnop");
-        // With reveal=false + non-TTY (tests run piped), still full token
-        // because is_stdout_tty() returns false → we show full token
+        // With reveal=false in test environment (stdout captured = file), token is redacted
+        // The test runner captures stdout as a file, not a pipe
         assert_eq!(format_token("test", "abcdefghijklmnop", TokenFormat::Raw, false),
-                   "abcdefghijklmnop");
-        // Redaction only kicks in when is_stdout_tty() == true && reveal == false
-        // We can't easily test the TTY path in unit tests, but test redact_token directly
+                   "abcdefgh...mnop");
+        // Redaction only shows full token when stdout is a pipe (to another process)
+        // We can't easily test the pipe scenario in unit tests, but test redact_token directly
         assert_eq!(redact_token("abcdefghijklmnop"), "abcdefgh...mnop");
     }
 }

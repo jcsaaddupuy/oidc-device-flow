@@ -67,7 +67,7 @@ fn encrypted_token_path(name: &str) -> Result<PathBuf> {
 }
 
 /// Ensure the tokens directory exists with 0o700 permissions.
-fn ensure_tokens_dir() -> Result<PathBuf> {
+pub fn ensure_tokens_dir() -> Result<PathBuf> {
     let dir = tokens_dir()?;
     if !dir.exists() {
         fs::create_dir_all(&dir)?;
@@ -176,9 +176,15 @@ pub fn delete_token_files(name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Get the refresh token for a provider.
+pub fn get_refresh_token(name: &str) -> Result<Option<String>> {
+    let data = load_token_data(name)?;
+    Ok(data.and_then(|d| d.refresh_token))
+}
+
 /// Load full token data from disk.
 /// Tries .json.age (encrypted) first, then .json (plain).
-fn load_token_data(name: &str) -> Result<Option<TokenData>> {
+pub fn load_token_data(name: &str) -> Result<Option<TokenData>> {
     // Try encrypted first
     let encrypted_path = encrypted_token_path(name)?;
     if encrypted_path.exists() {

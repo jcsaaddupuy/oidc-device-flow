@@ -31,6 +31,8 @@ pub enum Command {
     Login(LoginCmd),
     /// Print the access token for a provider
     Token(TokenCmd),
+    /// Print the refresh token for a provider
+    RefreshToken(RefreshTokenCmd),
     /// Refresh the access token for a provider
     Refresh(RefreshCmd),
     /// Show token status and expiry
@@ -64,6 +66,10 @@ pub struct AddCmd {
     #[arg(long)]
     pub client_id: String,
 
+    /// Client secret for confidential clients (required for refresh_token grant on some servers)
+    #[arg(long)]
+    pub client_secret: Option<String>,
+
     /// Explicit device authorization endpoint (skip discovery)
     #[arg(long)]
     pub device_auth_endpoint: Option<String>,
@@ -72,6 +78,10 @@ pub struct AddCmd {
     #[arg(long)]
     pub token_endpoint: Option<String>,
 
+    /// Redirect URI (some providers require this, e.g., "urn:ietf:wg:oauth:2.0:oob")
+    #[arg(long)]
+    pub redirect_uri: Option<String>,
+
     /// Scopes to request (comma-separated)
     #[arg(long, value_delimiter = ',')]
     pub scopes: Vec<String>,
@@ -79,8 +89,6 @@ pub struct AddCmd {
     /// Audience to request (some providers require this)
     #[arg(long)]
     pub audience: Option<String>,
-
-    #[arg(long)]
 
     /// Extra parameters to include in token requests (key=value)
     #[arg(long, value_parser = parse_key_value)]
@@ -138,6 +146,16 @@ pub struct TokenCmd {
     /// Output tokens for all providers
     #[arg(long)]
     pub all: bool,
+    /// Show full token even on a terminal (default: redacted on TTY)
+    #[arg(long)]
+    pub reveal: bool,
+}
+
+#[derive(clap::Args)]
+pub struct RefreshTokenCmd {
+    /// Provider name
+    pub name: String,
+
     /// Show full token even on a terminal (default: redacted on TTY)
     #[arg(long)]
     pub reveal: bool,

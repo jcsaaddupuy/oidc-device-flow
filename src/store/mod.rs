@@ -6,7 +6,9 @@ use crate::error::Result;
 pub trait TokenStore: Send + Sync {
     fn get_access_token(&self, name: &str) -> Result<Option<String>>;
     fn get_refresh_token(&self, name: &str) -> Result<Option<String>>;
+    #[allow(dead_code)]
     fn set_access_token(&self, name: &str, token: &str) -> Result<()>;
+    #[allow(dead_code)]
     fn set_refresh_token(&self, name: &str, token: &str) -> Result<()>;
     fn delete_tokens(&self, name: &str) -> Result<()>;
 }

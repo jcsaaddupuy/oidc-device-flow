@@ -4,9 +4,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderConfig {
     pub client_id: String,
+    /// Client secret for confidential clients (required for refresh_token grant on some servers)
+    pub client_secret: Option<String>,
     pub issuer_url: Option<String>,
     pub device_auth_endpoint: Option<String>,
     pub token_endpoint: Option<String>,
+    /// Redirect URI for providers that require it (e.g., "urn:ietf:wg:oauth:2.0:oob" for Trakt.tv)
+    pub redirect_uri: Option<String>,
     pub scopes: Vec<String>,
     pub audience: Option<String>,
     pub extra_params: Option<toml::Value>,
